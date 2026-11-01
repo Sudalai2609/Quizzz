@@ -49,3 +49,14 @@ export function grade(quiz,ans){
   const total=items.length;
   return{total,correct,incorrect,unanswered,pct:Math.round(correct/total*100),items};
 }
+
+// Compact wire format (v2): arrays instead of keyed objects, no UUIDs. Old v1 links still open.
+const DIFFS=['Easy','Medium','Hard'];
+export const compact=q=>{const pi=new Map((q.passages||[]).map((p,i)=>[p.id,i]));
+  return{v:2,i:q.id,t:q.title,p:(q.passages||[]).map(p=>[p.title||'',p.text]),
+    q:q.questions.map(x=>[x.passageId?pi.get(x.passageId):-1,x.text,x.options,'ABCD'.indexOf(x.answer),x.explanation||'',x.category||'',DIFFS.indexOf(x.difficulty)])}};
+export const expand=c=>{
+  if(c&&c.v===1)return c;
+  if(!c||c.v!==2||!Array.isArray(c.q)||!Array.isArray(c.p))throw new Error('This link is damaged or incomplete.');
+  return{id:c.i,title:c.t,passages:c.p.map(([title,text],i)=>({id:'p'+i,title,text})),
+    questions:c.q.map(([pi,text,options,a,explanation,category,d],i)=>({id:'q'+i,passageId:pi>=0?'p'+pi:null,text,options,answer:'ABCD'[a],explanation,category,difficulty:DIFFS[d]||''}))}};

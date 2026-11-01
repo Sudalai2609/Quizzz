@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react';
-import {put} from './db';
-import {unpack,pack,validateQuiz,grade} from './lib';
+import {put,all} from './db';
+import {unpack,pack,expand,validateQuiz,grade} from './lib';
 import {Passage,ShareBox} from './ui';
 const L=['A','B','C','D'];
 const groupsOf=qs=>{const g=[];qs.forEach(q=>{const l=g[g.length-1];if(q.passageId&&l&&l.pid===q.passageId)l.qs.push(q);else g.push({pid:q.passageId,qs:[q]})});return g};
@@ -9,7 +9,7 @@ const Fail=({m})=><div className="shell"><div className="card err"><h2>This link
 
 export function Quiz({payload}){
   const [quiz,setQuiz]=useState(null),[err,setErr]=useState(''),[ans,setAns]=useState({}),[step,setStep]=useState(0),[ask,setAsk]=useState(false),[res,setRes]=useState(null);
-  useEffect(()=>{unpack(payload||'').then(validateQuiz).then(setQuiz).catch(e=>setErr(e.message))},[payload]);
+  useEffect(()=>{unpack(payload||'').then(expand).then(validateQuiz).then(setQuiz).catch(e=>setErr(e.message))},[payload]);
   if(err)return <Fail m={err}/>;
   if(!quiz)return <div className="shell"><p className="muted">Opening quiz…</p></div>;
   if(res)return <Results quiz={quiz} r={res}/>;
@@ -32,8 +32,7 @@ export function Quiz({payload}){
 
 function Results({quiz,r}){
   const [url,setUrl]=useState('');
-  useEffect(()=>{pack({t:quiz.title,n:r.total,c:r.correct,w:r.incorrect,u:r.unanswered,p:r.pct,at:Date.now(),
-    it:r.items.map(({q,sel})=>[q.text.slice(0,90),sel,q.answer])}).then(p=>setUrl(location.origin+location.pathname+'#/results/'+p))},[]);
+  useEffect(()=>{pack({q:quiz.id,t:quiz.title,a:r.items.map(i=>i.sel||'-').join(''),c:r.correct,w:r.incorrect,u:r.unanswered,p:r.pct,at:Date.now()}).then(z=>setUrl(location.origin+location.pathname+'#/results/'+z))},[]);
   return <div className="shell take"><h1>Your results</h1><p className="muted">{quiz.title}</p><Summary r={r}/>
     <h2>Share results</h2><p className="muted">Nothing is sent automatically. Send this link to the quiz creator so they can see your score.</p>
     {url&&<ShareBox url={url} title="Quiz results" text={`${quiz.title}: ${r.correct}/${r.total} correct (${r.pct}%).`}/>}
@@ -44,13 +43,19 @@ function Results({quiz,r}){
 }
 
 export function SharedResult({payload}){
-  const [r,setR]=useState(null),[err,setErr]=useState(''),[saved,setSaved]=useState(false);
-  useEffect(()=>{unpack(payload||'').then(x=>{if(!x||!Array.isArray(x.it)||typeof x.n!=='number')throw Error('This results link is incomplete.');setR(x)}).catch(e=>setErr(e.message))},[payload]);
-  if(err)return <Fail m={err}/>;if(!r)return <div className="shell"><p className="muted">Opening results…</p></div>;
-  const save=async()=>{await put('results',{id:'shared-'+r.at,title:r.t,at:r.at,correct:r.c,total:r.n});setSaved(true)};
-  return <div className="shell take"><h1>Participant results</h1><p className="muted">{r.t}</p>
-    <Summary r={{pct:r.p,correct:r.c,incorrect:r.w,unanswered:r.u}}/>
-    {r.it.map(([t,s,a],i)=><article className="card" key={i}><p className="qt">{i+1}. {t}</p>
-      <p className={s===a?'ok':'errtxt'}>{s?`Chose ${s}`:'Skipped'} · Correct: {a}</p></article>)}
+  const [x,setX]=useState(null),[quiz,setQuiz]=useState(null),[err,setErr]=useState(''),[saved,setSaved]=useState(false);
+  useEffect(()=>{(async()=>{const r=await unpack(payload||'');
+    if(!r||typeof r.a!=='string'||typeof r.c!=='number')throw Error('This results link is incomplete.');
+    setX(r);try{const f=(await all('quizzes')).find(z=>z.id===r.q);if(f&&f.quiz)setQuiz(f.quiz)}catch{}})().catch(e=>setErr(e.message))},[payload]);
+  if(err)return <Fail m={err}/>;if(!x)return <div className="shell"><p className="muted">Opening results…</p></div>;
+  const full=quiz&&quiz.questions.length===x.a.length?grade(quiz,Object.fromEntries(quiz.questions.map((q,i)=>[q.id,x.a[i]==='-'?null:x.a[i]]))):null;
+  const save=async()=>{try{await put('results',{id:'shared-'+x.at,title:x.t,at:x.at,correct:x.c,total:x.c+x.w+x.u});setSaved(true)}catch{}};
+  return <div className="shell take"><h1>Participant results</h1><p className="muted">{x.t}</p>
+    <Summary r={{pct:x.p,correct:x.c,incorrect:x.w,unanswered:x.u}}/>
+    {full?full.items.map(({q,sel},i)=><article className="card" key={q.id}><p className="qt">{i+1}. {q.text}</p>
+      {q.options.map((t,j)=><div key={j} className={'opt'+(q.answer===L[j]?' right':sel===L[j]?' wrong':'')}><b>{L[j]}</b><span>{t}</span></div>)}
+      <p className="muted">{sel?`They chose ${sel}. `:'Skipped. '}Correct answer: {q.answer}.</p></article>)
+      :<div className="card"><p>Answers by question: {x.a.split('').map((s,i)=>`${i+1}:${s}`).join('  ')}</p>
+        <p className="muted">Open this link on the device where you created the quiz to see each question.</p></div>}
     <div className="row"><button className="btn" onClick={save} disabled={saved}>{saved?'Saved to history':'Save to this device'}</button><a className="btn ghost" href="#/">Open studio</a></div></div>;
 }

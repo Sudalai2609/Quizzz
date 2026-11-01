@@ -1,6 +1,6 @@
 import {useMemo,useState} from 'react';
 import {put,del,bulkPut,uid} from './db';
-import {selectQuiz,pack,validQuestion,LIMITS} from './lib';
+import {selectQuiz,pack,compact,validQuestion,LIMITS} from './lib';
 import {ShareBox,Passage} from './ui';
 const DIFF=['Easy','Medium','Hard'],STAT=['Unseen','Practised','Needs Revision'],L=['A','B','C','D'];
 const link=p=>location.origin+location.pathname+'#/'+p;
@@ -125,10 +125,10 @@ export function CreateQuiz({d,reload}){
   const gen=()=>{setOut(null);const r=selectQuiz(d.questions,d.passages,o);
     if(r.error){setQuiz(null);return setErr(r.error)}setErr('');setQuiz(r);setTitle((o.category||'Practice quiz')+' · '+new Date().toLocaleDateString())};
   const publish=async()=>{
-    const full={v:1,id:uid(),title:title.trim()||'Practice quiz',createdAt:Date.now(),...quiz};
-    try{const url=link('quiz/'+await pack(full));
+    const full={v:1,id:uid().slice(0,8),title:title.trim()||'Practice quiz',createdAt:Date.now(),...quiz};
+    try{const url=link('quiz/'+await pack(compact(full)));
       if(url.length>LIMITS.max)return setErr(`This link would be ${url.length.toLocaleString()} characters, above the ${LIMITS.max.toLocaleString()} limit. Choose fewer questions or shorter passages.`);
-      await put('quizzes',{id:full.id,title:full.title,createdAt:full.createdAt,count:full.questions.length});reload();setErr('');setOut({url,title:full.title})}
+      await put('quizzes',{id:full.id,title:full.title,createdAt:full.createdAt,count:full.questions.length,quiz:full});reload();setErr('');setOut({url,title:full.title})}
     catch(e){setErr('Could not create the link: '+e.message)}};
   const pas=id=>quiz.passages.find(p=>p.id===id);
   return <><h1>Create quiz</h1><div className="card form">
