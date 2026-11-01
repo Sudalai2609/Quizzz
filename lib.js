@@ -1,5 +1,5 @@
 // Pure logic: selection, grouping, URL encoding, validation, grading. No UI imports.
-export const LIMITS={warn:2000,max:16000};
+export const LIMITS={warn:6000,max:32000};
 const enc=new TextEncoder(),dec=new TextDecoder();
 const toB64=b=>{let s='';b.forEach(x=>s+=String.fromCharCode(x));return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')};
 const fromB64=s=>{s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';return Uint8Array.from(atob(s),c=>c.charCodeAt(0))};

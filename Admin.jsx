@@ -73,7 +73,7 @@ export function QuestionForm({d,id,reload}){
   const opt=i=>e=>setF({...f,options:f.options.map((o,j)=>j===i?e.target.value:o)});
   const save=async()=>{
     const q={...f,id:ex?ex.id:uid(),createdAt:ex?ex.createdAt:Date.now(),category:f.category.trim(),text:f.text.trim(),options:f.options.map(o=>o.trim()),explanation:f.explanation.trim()};
-    const m=!q.category?'Add a category.':!q.text?'Write the question text.':q.options.some(o=>!o)?'Fill in all four answer options.':!q.explanation?'Add an explanation for the correct answer.':f.passageId==='__new'&&!np.text.trim()?'Write the passage text or choose another passage option.':'';
+    const m=!q.category?'Add a category.':!q.text?'Write the question text.':q.options.some(o=>!o)?'Fill in all four answer options.':f.passageId==='__new'&&!np.text.trim()?'Write the passage text or choose another passage option.':'';
     if(m)return setErr(m);
     try{if(f.passageId==='__new'){const p={id:uid(),title:np.title.trim(),text:np.text.trim(),category:q.category};await put('passages',p);q.passageId=p.id}
       await put('questions',q);reload();location.hash='#/questions';
@@ -93,7 +93,7 @@ export function QuestionForm({d,id,reload}){
     <label>Question<textarea rows={3} value={f.text} onChange={set('text')}/></label>
     {L.map((l,i)=><label key={l}>Option {l}<input value={f.options[i]} onChange={opt(i)}/></label>)}
     <label>Correct answer<Sel v={f.answer} on={set('answer')} opts={L}/></label>
-    <label>Explanation<textarea rows={3} value={f.explanation} onChange={set('explanation')}/></label>
+    <label>Explanation (optional)<textarea rows={3} value={f.explanation} onChange={set('explanation')}/></label>
     <div className="two"><label>Difficulty<Sel v={f.difficulty} on={set('difficulty')} opts={DIFF}/></label><label>Status<Sel v={f.status} on={set('status')} opts={STAT}/></label></div>
     {err&&<p className="errtxt" role="alert">{err}</p>}
     <div className="row"><button className="btn" onClick={save}>Save question</button><button className="btn ghost" onClick={()=>setPrev(true)}>Preview</button><a className="btn ghost" href="#/questions">Cancel</a></div></div></>;
@@ -132,7 +132,7 @@ export function CreateQuiz({d,reload}){
     catch(e){setErr('Could not create the link: '+e.message)}};
   const pas=id=>quiz.passages.find(p=>p.id===id);
   return <><h1>Create quiz</h1><div className="card form">
-    <div className="two"><label>Questions<Sel v={o.n} on={e=>setO({...o,n:+e.target.value})} opts={[3,4,5]}/></label>
+    <div className="two"><label>Number of questions<input type="number" inputMode="numeric" min={1} max={100} value={o.n} onChange={e=>setO({...o,n:Math.max(1,Math.min(100,+e.target.value||1))})}/></label>
       <label>Difficulty<Sel v={o.difficulty} on={e=>setO({...o,difficulty:e.target.value})} opts={DIFF} all="Any"/></label></div>
     <label>Category<Sel v={o.category} on={e=>setO({...o,category:e.target.value})} opts={cats(d.questions)} all="All categories"/></label>
     <label className="chk"><input type="checkbox" checked={o.unseenOnly} onChange={e=>setO({...o,unseenOnly:e.target.checked})}/>Only unseen questions</label>
