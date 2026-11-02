@@ -120,10 +120,11 @@ export function Passages({d,reload}){
 }
 
 export function CreateQuiz({d,reload}){
-  const [o,setO]=useState({n:4,category:'',difficulty:'',unseenOnly:false,revision:true});
+  const [o,setO]=useState({n:4,category:'',difficulty:'',unseenOnly:false,revision:true,skipUsed:true});
   const [quiz,setQuiz]=useState(null),[err,setErr]=useState(''),[title,setTitle]=useState(''),[out,setOut]=useState(null);
-  const gen=()=>{setOut(null);const r=selectQuiz(d.questions,d.passages,o);
-    if(r.error){setQuiz(null);return setErr(r.error)}setErr('');setQuiz(r);setTitle((o.category||'Practice quiz')+' · '+new Date().toLocaleDateString())};
+  const used=new Set(d.quizzes.flatMap(z=>((z.quiz&&z.quiz.questions)||[]).map(q=>q.id)));
+  const gen=()=>{setOut(null);const r=selectQuiz(d.questions,d.passages,{...o,used:o.skipUsed?used:null});
+    if(r.error){setQuiz(null);return setErr(r.error+(o.skipUsed&&used.size?` ${used.size} question${used.size===1?' is':'s are'} hidden because earlier quizzes used them. Untick “Skip questions used in earlier quizzes” to allow repeats.`:''))}setErr('');setQuiz(r);setTitle((o.category||'Practice quiz')+' · '+new Date().toLocaleDateString())};
   const publish=async()=>{
     const full={v:1,id:uid().slice(0,8),title:title.trim()||'Practice quiz',createdAt:Date.now(),...quiz};
     try{const url=link('quiz/'+await pack(compact(full)));
@@ -137,6 +138,7 @@ export function CreateQuiz({d,reload}){
     <label>Category<Sel v={o.category} on={e=>setO({...o,category:e.target.value})} opts={cats(d.questions)} all="All categories"/></label>
     <label className="chk"><input type="checkbox" checked={o.unseenOnly} onChange={e=>setO({...o,unseenOnly:e.target.checked})}/>Only unseen questions</label>
     <label className="chk"><input type="checkbox" checked={o.revision} onChange={e=>setO({...o,revision:e.target.checked})}/>Include “Needs Revision” questions</label>
+    <label className="chk"><input type="checkbox" checked={o.skipUsed} onChange={e=>setO({...o,skipUsed:e.target.checked})}/>Skip questions used in earlier quizzes</label>
     <p className="muted">Questions that share a passage are always kept together, so the count must be reachable without splitting a passage.</p>
     <button className="btn" onClick={gen}>{quiz?'Pick again':'Generate preview'}</button></div>
     {err&&<div className="card err" role="alert">{err}</div>}
