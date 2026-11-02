@@ -3,4 +3,738 @@
 <meta name="theme-color" content="#111719"/><title>Passage Quiz Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700&display=swap" rel="stylesheet"/>
-</head><body><div id="root"></div><script type="module" src="/main.jsx"></script></body></html>
+<link rel="stylesheet" href="./styles.css"/>
+</head><body><div id="root"><p style="color:#aaa;font-family:sans-serif;padding:1rem">Loading…</p></div><script type="module">
+// Prebuilt single-file bundle of Passage Quiz Studio (generated). React loads from esm.sh.
+import * as __react from 'https://esm.sh/react@18.3.1';
+import * as __jsx from 'https://esm.sh/react@18.3.1/jsx-runtime';
+import * as __rdc from 'https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1';
+const __ext={'react':__react,'react/jsx-runtime':__jsx,'react-dom/client':__rdc};
+const __defs={};const __cache={};
+function __req(id){
+  if(__ext[id])return __ext[id];
+  id=id.replace(/^\.\//,'');
+  if(__cache[id])return __cache[id].exports;
+  const m=__cache[id]={exports:{}};
+  if(!__defs[id])throw new Error('Missing module '+id);
+  __defs[id](m,m.exports,__req);
+  return m.exports;
+}
+__defs["db"]=function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.uid = exports.bulkPut = exports.del = exports.put = exports.all = void 0;
+exports.useData = useData;
+const react_1 = require("react");
+const STORES = ['questions', 'passages', 'quizzes', 'results'];
+let dbp;
+const open = () => dbp || (dbp = new Promise((res, rej) => {
+    if (!window.indexedDB)
+        return rej(new Error('IndexedDB is not available in this browser.'));
+    const r = indexedDB.open('passage-quiz-studio', 1);
+    r.onupgradeneeded = () => STORES.forEach(s => r.result.createObjectStore(s, { keyPath: 'id' }));
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => { dbp = null; rej(r.error); };
+}));
+const tx = async (s, mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+        const t = db.transaction(s, mode);
+        const rq = fn(t.objectStore(s));
+        t.oncomplete = () => res(rq && rq.result);
+        t.onerror = t.onabort = () => rej(t.error);
+    });
+};
+const all = s => tx(s, 'readonly', o => o.getAll());
+exports.all = all;
+const put = (s, v) => tx(s, 'readwrite', o => o.put(v));
+exports.put = put;
+const del = (s, id) => tx(s, 'readwrite', o => o.delete(id));
+exports.del = del;
+const bulkPut = async (s, vs) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+        const t = db.transaction(s, 'readwrite');
+        vs.forEach(v => t.objectStore(s).put(v));
+        t.oncomplete = res;
+        t.onerror = t.onabort = () => rej(t.error);
+    });
+};
+exports.bulkPut = bulkPut;
+const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+exports.uid = uid;
+function useData() {
+    const [d, setD] = (0, react_1.useState)(null), [err, setErr] = (0, react_1.useState)(null);
+    const load = (0, react_1.useCallback)(async () => {
+        try {
+            const [questions, passages, quizzes, results] = await Promise.all(STORES.map(exports.all));
+            setD({ questions, passages, quizzes, results });
+        }
+        catch (e) {
+            setErr(e.message);
+        }
+    }, []);
+    (0, react_1.useEffect)(() => { load(); }, [load]);
+    return { d, err, reload: load };
+}
+
+};
+__defs["lib"]=function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.expand = exports.compact = exports.validQuestion = exports.LIMITS = void 0;
+exports.pack = pack;
+exports.unpack = unpack;
+exports.validateQuiz = validateQuiz;
+exports.selectQuiz = selectQuiz;
+exports.grade = grade;
+// Pure logic: selection, grouping, URL encoding, validation, grading. No UI imports.
+exports.LIMITS = { warn: 6000, max: 32000 };
+const enc = new TextEncoder(), dec = new TextDecoder();
+const toB64 = b => { let s = ''; b.forEach(x => s += String.fromCharCode(x)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const fromB64 = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4)
+    s += '='; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+// 'z' prefix = deflate-raw compressed, 'p' = plain JSON (fallback when CompressionStream is missing)
+async function pack(obj) {
+    const raw = enc.encode(JSON.stringify(obj));
+    if (typeof CompressionStream !== 'undefined') {
+        try {
+            return 'z' + toB64(await pipe(raw, new CompressionStream('deflate-raw')));
+        }
+        catch { }
+    }
+    return 'p' + toB64(raw);
+}
+async function unpack(s) {
+    try {
+        const b = fromB64(s.slice(1));
+        const raw = s[0] === 'z' ? await pipe(b, new DecompressionStream('deflate-raw')) : s[0] === 'p' ? b : null;
+        return JSON.parse(dec.decode(raw));
+    }
+    catch {
+        throw new Error('This link is damaged, incomplete or needs a newer browser.');
+    }
+}
+function validateQuiz(q) {
+    const bad = m => { throw new Error(m); };
+    if (!q || !Array.isArray(q.questions) || !q.questions.length)
+        bad('This quiz contains no questions.');
+    const pids = new Set((q.passages || []).map(p => p.id));
+    q.questions.forEach(x => {
+        if (!x.id || !x.text || !Array.isArray(x.options) || x.options.length !== 4 || !['A', 'B', 'C', 'D'].includes(x.answer))
+            bad('A question in this quiz is malformed.');
+        if (x.passageId && !pids.has(x.passageId))
+            bad('A passage in this quiz is missing.');
+    });
+    return q;
+}
+const validQuestion = q => q && q.id && q.text && q.category && Array.isArray(q.options) && q.options.length === 4 && ['A', 'B', 'C', 'D'].includes(q.answer);
+exports.validQuestion = validQuestion;
+const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+} return a; };
+function selectQuiz(qs, passages, o) {
+    const cs = o.categories && o.categories.length ? o.categories : (o.category ? [o.category] : []);
+    const pool = qs.filter(q => (!cs.length || cs.includes(q.category)) && (!o.difficulty || q.difficulty === o.difficulty) &&
+        (q.status === 'Needs Revision' ? o.revision : q.status === 'Unseen' || !o.unseenOnly) && !(o.used && o.used.has(q.id)));
+    const m = new Map(), groups = [];
+    pool.forEach(q => { if (q.passageId) {
+        if (!m.has(q.passageId)) {
+            const g = { pid: q.passageId, qs: [] };
+            m.set(q.passageId, g);
+            groups.push(g);
+        }
+        m.get(q.passageId).qs.push(q);
+    }
+    else
+        groups.push({ qs: [q] }); });
+    let pick = null;
+    for (let i = 0; i < 80 && !pick; i++) {
+        let t = 0;
+        const p = [];
+        for (const g of shuffle(groups)) {
+            if (t + g.qs.length <= o.n) {
+                p.push(g);
+                t += g.qs.length;
+            }
+            if (t === o.n)
+                break;
+        }
+        if (t === o.n)
+            pick = p;
+    }
+    if (!pick)
+        return { error: pool.length < o.n ? `Only ${pool.length} matching question${pool.length === 1 ? '' : 's'} available, but ${o.n} requested. Loosen the filters or add questions.`
+                : `Exactly ${o.n} questions isn't possible without splitting a passage's questions. Questions that share a passage are always kept together, so try a different count or filters.` };
+    const ids = new Set(pick.map(g => g.pid).filter(Boolean));
+    return { questions: pick.flatMap(g => g.qs).map(q => ({ id: q.id, passageId: q.passageId || null, category: q.category, difficulty: q.difficulty, text: q.text, options: q.options, answer: q.answer, explanation: q.explanation })),
+        passages: passages.filter(p => ids.has(p.id)).map(p => ({ id: p.id, title: p.title || '', text: p.text, category: p.category || '' })) };
+}
+function grade(quiz, ans) {
+    let correct = 0, incorrect = 0, unanswered = 0;
+    const items = quiz.questions.map(q => { const sel = ans[q.id] || null; if (!sel)
+        unanswered++;
+    else if (sel === q.answer)
+        correct++;
+    else
+        incorrect++; return { q, sel }; });
+    const total = items.length;
+    return { total, correct, incorrect, unanswered, pct: Math.round(correct / total * 100), items };
+}
+// Compact wire format (v2): arrays instead of keyed objects, no UUIDs. Old v1 links still open.
+const DIFFS = ['Easy', 'Medium', 'Hard'];
+const compact = q => {
+    const pi = new Map((q.passages || []).map((p, i) => [p.id, i]));
+    return { v: 2, i: q.id, t: q.title, p: (q.passages || []).map(p => [p.title || '', p.text]),
+        q: q.questions.map(x => [x.passageId ? pi.get(x.passageId) : -1, x.text, x.options, 'ABCD'.indexOf(x.answer), x.explanation || '', x.category || '', DIFFS.indexOf(x.difficulty)]) };
+};
+exports.compact = compact;
+const expand = c => {
+    if (c && c.v === 1)
+        return c;
+    if (!c || c.v !== 2 || !Array.isArray(c.q) || !Array.isArray(c.p))
+        throw new Error('This link is damaged or incomplete.');
+    return { id: c.i, title: c.t, passages: c.p.map(([title, text], i) => ({ id: 'p' + i, title, text })),
+        questions: c.q.map(([pi, text, options, a, explanation, category, d], i) => ({ id: 'q' + i, passageId: pi >= 0 ? 'p' + pi : null, text, options, answer: 'ABCD'[a], explanation, category, difficulty: DIFFS[d] || '' })) };
+};
+exports.expand = expand;
+
+};
+__defs["parse"]=function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseText = parseText;
+// Parses plain text into passages + questions. No UI or database imports.
+const id = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+function parseText(raw, d) {
+    const passages = [], questions = [], errors = [];
+    let cat = 'General', P = null, Q = null, f = null, n = 0, skipped = 0, m;
+    const seen = new Set(d.questions.map(q => norm(q.text)));
+    const finish = () => {
+        if (!Q)
+            return;
+        const lab = 'Question ' + Q.n, text = Q.text.trim();
+        if (!text)
+            errors.push(lab + ' has no question text.');
+        else if (Q.options.some(o => !o.trim()))
+            errors.push(lab + ' needs all four options (A to D).');
+        else if (!Q.answer)
+            errors.push(lab + ' has no "Answer:" line.');
+        else if (seen.has(norm(text)))
+            skipped++;
+        else {
+            let pid = null;
+            if (P && P.lines.length) {
+                if (P.rid === undefined) {
+                    const t = P.lines.join('\n'), ex = d.passages.find(p => norm(p.text) === norm(t));
+                    if (ex)
+                        P.rid = ex.id;
+                    else {
+                        P.rid = id();
+                        passages.push({ id: P.rid, title: P.title, text: t, category: cat });
+                    }
+                }
+                pid = P.rid;
+            }
+            seen.add(norm(text));
+            questions.push({ id: id(), category: cat, passageId: pid, text, options: Q.options.map(o => o.trim()), answer: Q.answer,
+                explanation: Q.explanation.trim(), difficulty: Q.difficulty, status: 'Unseen', createdAt: Date.now() + questions.length });
+        }
+        Q = null;
+        f = null;
+    };
+    for (const l0 of raw.replace(/\r/g, '').split('\n')) {
+        const line = l0.trim();
+        if (!line)
+            continue;
+        if (m = line.match(/^category\s*:\s*(.*)$/i)) {
+            finish();
+            cat = m[1].trim() || 'General';
+            continue;
+        }
+        if (m = line.match(/^passage\s*:\s*(.*)$/i)) {
+            finish();
+            const rest = m[1].trim();
+            if (/^(none|nil|no)$/i.test(rest)) {
+                P = null;
+                f = null;
+            }
+            else {
+                P = { title: '', lines: rest ? [rest] : [] };
+                f = 'p';
+            }
+            continue;
+        }
+        if (m = line.match(/^(?:q|question)\s*(\d+)?\s*[.):\-]\s*(.*)$/i)) {
+            finish();
+            Q = { n: m[1] || ++n, text: m[2], options: ['', '', '', ''], answer: '', explanation: '', difficulty: 'Medium' };
+            f = 'q';
+            continue;
+        }
+        if (P && !Q && (m = line.match(/^title\s*:\s*(.*)$/i))) {
+            P.title = m[1].trim();
+            continue;
+        }
+        if (Q) {
+            if (m = line.match(/^\(?([A-D])[.)]\s*(.*)$/i)) {
+                const i = 'ABCD'.indexOf(m[1].toUpperCase());
+                Q.options[i] = m[2];
+                f = 'o' + i;
+                continue;
+            }
+            if (m = line.match(/^(?:answer|ans|key|correct(?: answer)?)\s*:\s*\(?([A-D])\b/i)) {
+                Q.answer = m[1].toUpperCase();
+                f = null;
+                continue;
+            }
+            if (m = line.match(/^(?:explanation|exp|reason)\s*:\s*(.*)$/i)) {
+                Q.explanation = /^(nil|none|n\/a|-)$/i.test(m[1].trim()) ? '' : m[1];
+                f = 'e';
+                continue;
+            }
+            if (m = line.match(/^difficulty\s*:\s*(easy|medium|hard)/i)) {
+                const v = m[1].toLowerCase();
+                Q.difficulty = v[0].toUpperCase() + v.slice(1);
+                f = null;
+                continue;
+            }
+            if (f === 'q')
+                Q.text += ' ' + line;
+            else if (f && f[0] === 'o')
+                Q.options[+f[1]] += ' ' + line;
+            else if (f === 'e')
+                Q.explanation += ' ' + line;
+            else
+                errors.push(`Question ${Q.n}: couldn't read "${line.slice(0, 40)}".`);
+        }
+        else if (P && f === 'p')
+            P.lines.push(line);
+        else
+            errors.push(`Couldn't read "${line.slice(0, 40)}". Start with Category:, Passage: or Q1.`);
+    }
+    finish();
+    if (!questions.length && !errors.length && !skipped)
+        errors.push('No questions found. Start each question with "Q1." and each option with "A)".');
+    return { passages, questions, errors, skipped };
+}
+
+};
+__defs["ui"]=function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Passage = void 0;
+exports.ShareBox = ShareBox;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = require("react");
+const Passage = ({ p }) => p ? (0, jsx_runtime_1.jsxs)("section", { className: "passage", children: [(0, jsx_runtime_1.jsx)("h2", { children: p.title || 'Passage' }), p.text.split(/\n+/).map((t, i) => (0, jsx_runtime_1.jsx)("p", { children: t }, i))] }) : null;
+exports.Passage = Passage;
+function ShareBox({ url, text, title }) {
+    const [m, setM] = (0, react_1.useState)('');
+    const copy = async (s) => {
+        try {
+            await navigator.clipboard.writeText(s);
+            setM('Copied to clipboard.');
+        }
+        catch {
+            const t = document.getElementById('sharebox');
+            t.select();
+            setM(document.execCommand && document.execCommand('copy') ? 'Copied to clipboard.' : 'Copy failed. Select the link above and copy it manually.');
+        }
+    };
+    const share = async () => { try {
+        await navigator.share({ title, text, url });
+    }
+    catch (e) {
+        if (e.name !== 'AbortError')
+            copy(url);
+    } };
+    return (0, jsx_runtime_1.jsxs)("div", { className: "card", children: [(0, jsx_runtime_1.jsx)("textarea", { id: "sharebox", readOnly: true, value: url, rows: 3, onFocus: e => e.target.select(), "aria-label": "Link" }), (0, jsx_runtime_1.jsxs)("div", { className: "row", children: [(0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: () => copy(url), children: "Copy link" }), navigator.share && (0, jsx_runtime_1.jsx)("button", { className: "btn ghost", onClick: share, children: "Share" }), text && (0, jsx_runtime_1.jsx)("button", { className: "btn ghost", onClick: () => copy(text + '\n' + url), children: "Copy message" })] }), (0, jsx_runtime_1.jsx)("p", { className: "muted", role: "status", children: m })] });
+}
+
+};
+__defs["TextImport"]=function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.TextImport = TextImport;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = require("react");
+const db_1 = require("./db");
+const parse_1 = require("./parse");
+const SAMPLE = `Category: Science
+Passage: Bees
+Bees pollinate many crops. A single hive can hold tens of thousands of workers.
+Q1. What do bees mainly do for crops?
+A) Eat them
+B) Pollinate them
+C) Water them
+D) Harvest them
+Answer: B
+Explanation: Bees carry pollen between flowers.
+Q2. Roughly how many workers can a hive hold?
+A) Dozens
+B) Hundreds
+C) Tens of thousands
+D) Millions
+Answer: C`;
+function TextImport({ d, reload }) {
+    const [t, setT] = (0, react_1.useState)(''), [r, setR] = (0, react_1.useState)(null), [msg, setMsg] = (0, react_1.useState)('');
+    const load = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) {
+        setT(await f.text());
+        setR(null);
+        setMsg('');
+    } };
+    const go = async () => {
+        try {
+            await (0, db_1.bulkPut)('passages', r.passages);
+            await (0, db_1.bulkPut)('questions', r.questions);
+            setMsg(`Imported ${r.questions.length} questions and ${r.passages.length} new passages.` + (r.skipped ? ` Skipped ${r.skipped} already in your bank.` : ''));
+            setR(null);
+            setT('');
+            reload();
+        }
+        catch (e) {
+            setMsg('Import failed: ' + e.message);
+        }
+    };
+    return (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)("h1", { children: "Import from text" }), (0, jsx_runtime_1.jsxs)("div", { className: "card form", children: [(0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Paste text (copying from Word works) or load a .txt file. Each passage is followed by its questions. Explanation is optional. Category, Title and Difficulty lines are optional." }), (0, jsx_runtime_1.jsx)("textarea", { rows: 12, value: t, onChange: e => { setT(e.target.value); setR(null); setMsg(''); }, placeholder: SAMPLE, "aria-label": "Question text" }), (0, jsx_runtime_1.jsxs)("label", { children: ["Or load a text file", (0, jsx_runtime_1.jsx)("input", { type: "file", accept: ".txt,text/plain", onChange: load })] }), (0, jsx_runtime_1.jsx)("div", { className: "row", children: (0, jsx_runtime_1.jsx)("button", { className: "btn", disabled: !t.trim(), onClick: () => { setMsg(''); setR((0, parse_1.parseText)(t, d)); }, children: "Check" }) })] }), r && (r.errors.length ? (0, jsx_runtime_1.jsxs)("div", { className: "card err", role: "alert", children: [(0, jsx_runtime_1.jsx)("h2", { children: "Fix these first" }), (0, jsx_runtime_1.jsx)("ul", { children: r.errors.map((e, i) => (0, jsx_runtime_1.jsx)("li", { children: e }, i)) }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Nothing was imported." })] })
+                : (0, jsx_runtime_1.jsxs)("div", { className: "card", children: [(0, jsx_runtime_1.jsxs)("p", { children: ["Ready: ", r.questions.length, " questions, ", r.passages.length, " new passages", r.skipped ? `, ${r.skipped} skipped as already in your bank` : '', "."] }), (0, jsx_runtime_1.jsx)("button", { className: "btn", disabled: !r.questions.length, onClick: go, children: "Import" })] })), msg && (0, jsx_runtime_1.jsx)("p", { role: "status", children: msg })] });
+}
+
+};
+__defs["Participant"]=function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Quiz = Quiz;
+exports.SharedResult = SharedResult;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = require("react");
+const db_1 = require("./db");
+const lib_1 = require("./lib");
+const ui_1 = require("./ui");
+const L = ['A', 'B', 'C', 'D'];
+const groupsOf = qs => { const g = []; qs.forEach(q => { const l = g[g.length - 1]; if (q.passageId && l && l.pid === q.passageId)
+    l.qs.push(q);
+else
+    g.push({ pid: q.passageId, qs: [q] }); }); return g; };
+const Summary = ({ r }) => (0, jsx_runtime_1.jsxs)("div", { className: "stats", children: [(0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsxs)("b", { children: [r.pct, "%"] }), "Accuracy"] }), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("b", { children: r.correct }), "Correct"] }), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("b", { children: r.incorrect }), "Incorrect"] }), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("b", { children: r.unanswered }), "Unanswered"] })] });
+const Fail = ({ m }) => (0, jsx_runtime_1.jsx)("div", { className: "shell", children: (0, jsx_runtime_1.jsxs)("div", { className: "card err", children: [(0, jsx_runtime_1.jsx)("h2", { children: "This link can't be opened" }), (0, jsx_runtime_1.jsx)("p", { children: m }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Ask the sender to share the quiz link again." })] }) });
+function Quiz({ payload }) {
+    const [quiz, setQuiz] = (0, react_1.useState)(null), [err, setErr] = (0, react_1.useState)(''), [sub, setSub] = (0, react_1.useState)(null), [ans, setAns] = (0, react_1.useState)({}), [step, setStep] = (0, react_1.useState)(0), [ask, setAsk] = (0, react_1.useState)(false), [res, setRes] = (0, react_1.useState)(null);
+    (0, react_1.useEffect)(() => { (0, lib_1.unpack)(payload || '').then(lib_1.expand).then(lib_1.validateQuiz).then(setQuiz).catch(e => setErr(e.message)); }, [payload]);
+    if (err)
+        return (0, jsx_runtime_1.jsx)(Fail, { m: err });
+    if (!quiz)
+        return (0, jsx_runtime_1.jsx)("div", { className: "shell", children: (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Opening quiz\u2026" }) });
+    const Z = sub || quiz;
+    const retry = () => {
+        const miss = new Set(res.items.filter(i => i.sel !== i.q.answer).map(i => i.q.id));
+        const qs = Z.questions.filter(q => miss.has(q.id)), pids = new Set(qs.map(q => q.passageId).filter(Boolean));
+        setSub({ ...Z, id: quiz.id + '-retry', title: quiz.title.replace(/ \(retry\)$/, '') + ' (retry)', questions: qs, passages: (Z.passages || []).filter(p => pids.has(p.id)) });
+        setAns({});
+        setStep(0);
+        setAsk(false);
+        setRes(null);
+        scrollTo(0, 0);
+    };
+    if (res)
+        return (0, jsx_runtime_1.jsx)(Results, { quiz: Z, r: res, onRetry: res.correct < res.total ? retry : null });
+    const gs = groupsOf(Z.questions), g = gs[step], last = step === gs.length - 1;
+    const done = Z.questions.filter(q => ans[q.id]).length, total = Z.questions.length;
+    const submit = async () => {
+        const r = (0, lib_1.grade)(Z, ans);
+        setRes(r);
+        scrollTo(0, 0);
+        try {
+            await (0, db_1.put)('results', { id: Z.id + '-' + Date.now(), quizId: Z.id, title: Z.title, at: Date.now(), correct: r.correct, total: r.total });
+        }
+        catch { }
+    };
+    return (0, jsx_runtime_1.jsxs)("div", { className: "shell take", children: [(0, jsx_runtime_1.jsxs)("header", { children: [(0, jsx_runtime_1.jsx)("h1", { children: Z.title }), (0, jsx_runtime_1.jsx)("div", { className: "bar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": total, "aria-valuenow": done, children: (0, jsx_runtime_1.jsx)("i", { style: { width: done / total * 100 + '%' } }) }), (0, jsx_runtime_1.jsxs)("p", { className: "muted", children: [done, " of ", total, " answered \u00B7 Part ", step + 1, " of ", gs.length] })] }), (0, jsx_runtime_1.jsx)(ui_1.Passage, { p: Z.passages?.find(p => p.id === g.pid) }), g.qs.map(q => (0, jsx_runtime_1.jsxs)("fieldset", { className: "card", children: [(0, jsx_runtime_1.jsxs)("legend", { className: "qt", children: [Z.questions.indexOf(q) + 1, ". ", q.text] }), !ans[q.id] && (0, jsx_runtime_1.jsx)("p", { className: "warn", children: "Not answered yet" }), q.options.map((t, i) => (0, jsx_runtime_1.jsxs)("label", { className: 'opt' + (ans[q.id] === L[i] ? ' on' : ''), children: [(0, jsx_runtime_1.jsx)("input", { type: "radio", name: q.id, checked: ans[q.id] === L[i], onChange: () => setAns({ ...ans, [q.id]: L[i] }) }), (0, jsx_runtime_1.jsx)("b", { children: L[i] }), (0, jsx_runtime_1.jsx)("span", { children: t })] }, i))] }, q.id)), ask && (0, jsx_runtime_1.jsxs)("div", { className: "card", role: "alertdialog", "aria-label": "Confirm submission", children: [(0, jsx_runtime_1.jsxs)("p", { children: [total - done ? `${total - done} question${total - done > 1 ? 's are' : ' is'} unanswered. ` : '', "Submit your answers? You can't change them afterwards."] }), (0, jsx_runtime_1.jsxs)("div", { className: "row", children: [(0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: submit, children: "Submit" }), (0, jsx_runtime_1.jsx)("button", { className: "btn ghost", onClick: () => setAsk(false), children: "Keep going" })] })] }), (0, jsx_runtime_1.jsxs)("div", { className: "row nav", children: [(0, jsx_runtime_1.jsx)("button", { className: "btn ghost", disabled: !step, onClick: () => { setStep(step - 1); setAsk(false); }, children: "Back" }), last ? (0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: () => setAsk(true), children: "Review and submit" }) : (0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: () => setStep(step + 1), children: "Next" })] })] });
+}
+function Results({ quiz, r, onRetry }) {
+    const [url, setUrl] = (0, react_1.useState)('');
+    (0, react_1.useEffect)(() => { (0, lib_1.pack)({ q: quiz.id, t: quiz.title, a: r.items.map(i => i.sel || '-').join(''), c: r.correct, w: r.incorrect, u: r.unanswered, p: r.pct, at: Date.now() }).then(z => setUrl(location.origin + location.pathname + '#/results/' + z)); }, []);
+    return (0, jsx_runtime_1.jsxs)("div", { className: "shell take", children: [(0, jsx_runtime_1.jsx)("h1", { children: "Your results" }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: quiz.title }), (0, jsx_runtime_1.jsx)(Summary, { r: r }), onRetry && (0, jsx_runtime_1.jsx)("div", { className: "row", children: (0, jsx_runtime_1.jsxs)("button", { className: "btn", onClick: onRetry, children: ["Retry ", r.incorrect + r.unanswered, " missed question", r.incorrect + r.unanswered === 1 ? '' : 's'] }) }), (0, jsx_runtime_1.jsx)("h2", { children: "Share results" }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Nothing is sent automatically. Send this link to the quiz creator so they can see your score." }), url && (0, jsx_runtime_1.jsx)(ui_1.ShareBox, { url: url, title: "Quiz results", text: `${quiz.title}: ${r.correct}/${r.total} correct (${r.pct}%).` }), (0, jsx_runtime_1.jsx)("h2", { children: "Review" }), r.items.map(({ q, sel }, i) => (0, jsx_runtime_1.jsxs)("article", { className: "card", children: [(0, jsx_runtime_1.jsxs)("p", { className: "qt", children: [i + 1, ". ", q.text] }), q.options.map((t, j) => (0, jsx_runtime_1.jsxs)("div", { className: 'opt' + (q.answer === L[j] ? ' right' : sel === L[j] ? ' wrong' : ''), children: [(0, jsx_runtime_1.jsx)("b", { children: L[j] }), (0, jsx_runtime_1.jsx)("span", { children: t })] }, j)), (0, jsx_runtime_1.jsxs)("p", { className: "muted", children: [sel ? `You chose ${sel}. ` : 'You skipped this. ', "Correct answer: ", q.answer, "."] }), (0, jsx_runtime_1.jsx)("p", { children: q.explanation })] }, q.id))] });
+}
+function SharedResult({ payload }) {
+    const [x, setX] = (0, react_1.useState)(null), [quiz, setQuiz] = (0, react_1.useState)(null), [err, setErr] = (0, react_1.useState)(''), [saved, setSaved] = (0, react_1.useState)(false), [note, setNote] = (0, react_1.useState)('');
+    (0, react_1.useEffect)(() => {
+        (async () => {
+            const r = await (0, lib_1.unpack)(payload || '');
+            if (!r || typeof r.a !== 'string' || typeof r.c !== 'number')
+                throw Error('This results link is incomplete.');
+            setX(r);
+            try {
+                const f = (await (0, db_1.all)('quizzes')).find(z => z.id === r.q);
+                if (f && f.quiz)
+                    setQuiz(f.quiz);
+            }
+            catch { }
+        })().catch(e => setErr(e.message));
+    }, [payload]);
+    if (err)
+        return (0, jsx_runtime_1.jsx)(Fail, { m: err });
+    if (!x)
+        return (0, jsx_runtime_1.jsx)("div", { className: "shell", children: (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Opening results\u2026" }) });
+    const full = quiz && quiz.questions.length === x.a.length ? (0, lib_1.grade)(quiz, Object.fromEntries(quiz.questions.map((q, i) => [q.id, x.a[i] === '-' ? null : x.a[i]]))) : null;
+    const save = async () => {
+        try {
+            await (0, db_1.put)('results', { id: 'shared-' + x.at, title: x.t, at: x.at, correct: x.c, total: x.c + x.w + x.u });
+            if (full) {
+                const m = new Map((await (0, db_1.all)('questions')).map(q => [q.id, q]));
+                const ups = full.items.map(({ q, sel }) => m.has(q.id) ? { ...m.get(q.id), status: sel === q.answer ? 'Practised' : 'Needs Revision' } : null).filter(Boolean);
+                await (0, db_1.bulkPut)('questions', ups);
+                setNote(`Updated ${ups.length} question status${ups.length === 1 ? '' : 'es'}: correct answers are now Practised, wrong or skipped ones Needs Revision.`);
+            }
+            setSaved(true);
+        }
+        catch (e) {
+            setNote('Could not save: ' + e.message);
+        }
+    };
+    return (0, jsx_runtime_1.jsxs)("div", { className: "shell take", children: [(0, jsx_runtime_1.jsx)("h1", { children: "Participant results" }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: x.t }), (0, jsx_runtime_1.jsx)(Summary, { r: { pct: x.p, correct: x.c, incorrect: x.w, unanswered: x.u } }), full ? full.items.map(({ q, sel }, i) => (0, jsx_runtime_1.jsxs)("article", { className: "card", children: [(0, jsx_runtime_1.jsxs)("p", { className: "qt", children: [i + 1, ". ", q.text] }), q.options.map((t, j) => (0, jsx_runtime_1.jsxs)("div", { className: 'opt' + (q.answer === L[j] ? ' right' : sel === L[j] ? ' wrong' : ''), children: [(0, jsx_runtime_1.jsx)("b", { children: L[j] }), (0, jsx_runtime_1.jsx)("span", { children: t })] }, j)), (0, jsx_runtime_1.jsxs)("p", { className: "muted", children: [sel ? `They chose ${sel}. ` : 'Skipped. ', "Correct answer: ", q.answer, "."] })] }, q.id))
+                : (0, jsx_runtime_1.jsxs)("div", { className: "card", children: [(0, jsx_runtime_1.jsxs)("p", { children: ["Answers by question: ", x.a.split('').map((s, i) => `${i + 1}:${s}`).join('  ')] }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Open this link on the device where you created the quiz to see each question." })] }), note && (0, jsx_runtime_1.jsx)("p", { role: "status", children: note }), (0, jsx_runtime_1.jsxs)("div", { className: "row", children: [(0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: save, disabled: saved, children: saved ? 'Saved' : full ? 'Save and update question statuses' : 'Save to this device' }), (0, jsx_runtime_1.jsx)("a", { className: "btn ghost", href: "#/", children: "Open studio" })] })] });
+}
+
+};
+__defs["Admin"]=function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Dashboard = Dashboard;
+exports.Questions = Questions;
+exports.QuestionForm = QuestionForm;
+exports.Passages = Passages;
+exports.CreateQuiz = CreateQuiz;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = require("react");
+const db_1 = require("./db");
+const lib_1 = require("./lib");
+const ui_1 = require("./ui");
+const DIFF = ['Easy', 'Medium', 'Hard'], STAT = ['Unseen', 'Practised', 'Needs Revision'], L = ['A', 'B', 'C', 'D'];
+const link = p => location.origin + location.pathname + '#/' + p;
+const cats = qs => [...new Set(qs.map(q => q.category))].sort();
+const Sel = ({ v, on, opts, label, all }) => (0, jsx_runtime_1.jsxs)("select", { value: v, onChange: on, "aria-label": label, children: [all && (0, jsx_runtime_1.jsx)("option", { value: "", children: all }), opts.map(o => (0, jsx_runtime_1.jsx)("option", { children: o }, o))] });
+function Dashboard({ d, reload }) {
+    const [msg, setMsg] = (0, react_1.useState)('');
+    const by = {};
+    d.questions.forEach(q => by[q.category] = (by[q.category] || 0) + 1);
+    const act = [...d.quizzes.map(q => ({ at: q.createdAt, t: `Generated “${q.title}” (${q.count} questions)` })),
+        ...d.results.map(r => ({ at: r.at, t: `Result for “${r.title}”: ${r.correct}/${r.total}` }))].sort((a, b) => b.at - a.at).slice(0, 5);
+    const exp = () => {
+        const b = new Blob([JSON.stringify({ app: 'passage-quiz-studio', version: 1, exportedAt: Date.now(), ...d }, null, 1)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(b);
+        a.download = 'passage-quiz-backup.json';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+    const imp = async (e) => {
+        const f = e.target.files[0];
+        e.target.value = '';
+        if (!f)
+            return;
+        try {
+            const j = JSON.parse(await f.text());
+            if (j.app !== 'passage-quiz-studio')
+                throw Error('This is not a Passage Quiz Studio backup.');
+            const qs = j.questions || [], ps = j.passages || [];
+            if (!Array.isArray(qs) || !Array.isArray(ps))
+                throw Error('The backup has no questions or passages list.');
+            const bad = qs.findIndex(q => !(0, lib_1.validQuestion)(q));
+            if (bad >= 0)
+                throw Error(`Question ${bad + 1} in the backup is invalid.`);
+            if (ps.some(p => !p || !p.id || !p.text))
+                throw Error('A passage in the backup is invalid.');
+            const hq = new Set(d.questions.map(q => q.id)), hp = new Set(d.passages.map(p => p.id));
+            const nq = qs.filter(q => !hq.has(q.id)), np = ps.filter(p => !hp.has(p.id));
+            await (0, db_1.bulkPut)('passages', np);
+            await (0, db_1.bulkPut)('questions', nq);
+            for (const s of ['quizzes', 'results'])
+                if (Array.isArray(j[s]))
+                    await (0, db_1.bulkPut)(s, j[s].filter(x => x && x.id));
+            setMsg(`Restored ${nq.length} questions and ${np.length} passages. Skipped ${qs.length - nq.length} questions and ${ps.length - np.length} passages whose IDs already exist here.`);
+            reload();
+        }
+        catch (x) {
+            setMsg('Import failed: ' + x.message);
+        }
+    };
+    return (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)("h1", { children: "Dashboard" }), (0, jsx_runtime_1.jsxs)("div", { className: "stats", children: [(0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("b", { children: d.questions.length }), "Questions"] }), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("b", { children: d.passages.length }), "Passages"] }), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("b", { children: d.quizzes.length }), "Quizzes generated"] })] }), (0, jsx_runtime_1.jsxs)("div", { className: "row", children: [(0, jsx_runtime_1.jsx)("a", { className: "btn", href: "#/questions/new", children: "Add question" }), (0, jsx_runtime_1.jsx)("a", { className: "btn ghost", href: "#/questions", children: "Question bank" }), (0, jsx_runtime_1.jsx)("a", { className: "btn ghost", href: "#/create-quiz", children: "Create quiz" }), (0, jsx_runtime_1.jsx)("button", { className: "btn ghost", onClick: exp, disabled: !d.questions.length && !d.passages.length, children: "Export backup" })] }), (0, jsx_runtime_1.jsxs)("section", { className: "card", children: [(0, jsx_runtime_1.jsx)("h2", { children: "By category" }), Object.keys(by).length ? (0, jsx_runtime_1.jsx)("ul", { className: "plain", children: Object.entries(by).map(([c, n]) => (0, jsx_runtime_1.jsxs)("li", { children: [(0, jsx_runtime_1.jsx)("span", { children: c }), (0, jsx_runtime_1.jsx)("b", { children: n })] }, c)) })
+                        : (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "No questions yet. Add your first question to get started." })] }), (0, jsx_runtime_1.jsxs)("section", { className: "card", children: [(0, jsx_runtime_1.jsx)("h2", { children: "Recent activity" }), act.length ? (0, jsx_runtime_1.jsx)("ul", { className: "plain", children: act.map((a, i) => (0, jsx_runtime_1.jsxs)("li", { children: [(0, jsx_runtime_1.jsx)("span", { children: a.t }), (0, jsx_runtime_1.jsx)("span", { className: "muted", children: new Date(a.at).toLocaleDateString() })] }, i)) })
+                        : (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Nothing yet. Generated quizzes and saved results appear here." })] }), (0, jsx_runtime_1.jsxs)("section", { className: "card", children: [(0, jsx_runtime_1.jsx)("h2", { children: "Restore from backup" }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Import a JSON backup. Items whose IDs already exist are skipped, never overwritten." }), (0, jsx_runtime_1.jsx)("input", { type: "file", accept: "application/json,.json", onChange: imp, "aria-label": "Backup file" }), msg && (0, jsx_runtime_1.jsx)("p", { role: "status", children: msg })] })] });
+}
+function Questions({ d, reload }) {
+    const [f, setF] = (0, react_1.useState)({ s: '', c: '', d: '', st: '', sort: 'new' });
+    const set = k => e => setF({ ...f, [k]: e.target.value });
+    const pt = id => d.passages.find(p => p.id === id);
+    const rows = (0, react_1.useMemo)(() => {
+        const s = f.s.toLowerCase();
+        const r = d.questions.filter(q => (!s || (q.text + ' ' + q.category).toLowerCase().includes(s)) && (!f.c || q.category === f.c) && (!f.d || q.difficulty === f.d) && (!f.st || q.status === f.st));
+        const k = { new: (a, b) => b.createdAt - a.createdAt, cat: (a, b) => a.category.localeCompare(b.category), diff: (a, b) => DIFF.indexOf(a.difficulty) - DIFF.indexOf(b.difficulty) };
+        return r.sort(k[f.sort]);
+    }, [d, f]);
+    const rm = async (q) => { if (confirm('Delete this question? This cannot be undone.')) {
+        await (0, db_1.del)('questions', q.id);
+        reload();
+    } };
+    return (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsxs)("div", { className: "between", children: [(0, jsx_runtime_1.jsx)("h1", { children: "Question bank" }), (0, jsx_runtime_1.jsx)("a", { className: "btn", href: "#/questions/new", children: "Add question" })] }), (0, jsx_runtime_1.jsxs)("div", { className: "filters", children: [(0, jsx_runtime_1.jsx)("input", { type: "search", placeholder: "Search questions", value: f.s, onChange: set('s'), "aria-label": "Search" }), (0, jsx_runtime_1.jsx)(Sel, { v: f.c, on: set('c'), opts: cats(d.questions), label: "Category", all: "All categories" }), (0, jsx_runtime_1.jsx)(Sel, { v: f.d, on: set('d'), opts: DIFF, label: "Difficulty", all: "Any difficulty" }), (0, jsx_runtime_1.jsx)(Sel, { v: f.st, on: set('st'), opts: STAT, label: "Status", all: "Any status" }), (0, jsx_runtime_1.jsxs)("select", { value: f.sort, onChange: set('sort'), "aria-label": "Sort", children: [(0, jsx_runtime_1.jsx)("option", { value: "new", children: "Newest first" }), (0, jsx_runtime_1.jsx)("option", { value: "cat", children: "Category" }), (0, jsx_runtime_1.jsx)("option", { value: "diff", children: "Difficulty" })] })] }), !d.questions.length ? (0, jsx_runtime_1.jsx)("div", { className: "card", children: (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Your question bank is empty. Add a question to begin." }) })
+                : !rows.length ? (0, jsx_runtime_1.jsx)("div", { className: "card", children: (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "No questions match these filters." }) })
+                    : rows.map(q => (0, jsx_runtime_1.jsxs)("article", { className: "card q", children: [(0, jsx_runtime_1.jsx)("p", { className: "qt", children: q.text }), (0, jsx_runtime_1.jsxs)("p", { className: "muted", children: [q.category, " \u00B7 ", q.difficulty, " \u00B7 ", q.status, q.passageId && pt(q.passageId) ? ` · Passage: ${pt(q.passageId).title || 'Untitled'}` : ''] }), (0, jsx_runtime_1.jsxs)("div", { className: "row", children: [(0, jsx_runtime_1.jsx)("a", { className: "btn ghost sm", href: '#/questions/' + q.id, children: "Edit" }), (0, jsx_runtime_1.jsx)("button", { className: "btn danger sm", onClick: () => rm(q), children: "Delete" })] })] }, q.id))] });
+}
+function QuestionForm({ d, id, reload }) {
+    const ex = d.questions.find(q => q.id === id);
+    const [f, setF] = (0, react_1.useState)(() => ex ? { ...ex, passageId: ex.passageId || '', options: [...ex.options] } : { category: '', passageId: '', text: '', options: ['', '', '', ''], answer: 'A', explanation: '', difficulty: 'Medium', status: 'Unseen' });
+    const [np, setNp] = (0, react_1.useState)({ title: '', text: '' }), [prev, setPrev] = (0, react_1.useState)(false), [err, setErr] = (0, react_1.useState)('');
+    if (id !== 'new' && !ex)
+        return (0, jsx_runtime_1.jsxs)("div", { className: "card", children: ["Question not found. ", (0, jsx_runtime_1.jsx)("a", { href: "#/questions", children: "Back to questions" })] });
+    const set = k => e => setF({ ...f, [k]: e.target.value });
+    const opt = i => e => setF({ ...f, options: f.options.map((o, j) => j === i ? e.target.value : o) });
+    const save = async () => {
+        const q = { ...f, id: ex ? ex.id : (0, db_1.uid)(), createdAt: ex ? ex.createdAt : Date.now(), category: f.category.trim(), text: f.text.trim(), options: f.options.map(o => o.trim()), explanation: f.explanation.trim() };
+        const m = !q.category ? 'Add a category.' : !q.text ? 'Write the question text.' : q.options.some(o => !o) ? 'Fill in all four answer options.' : f.passageId === '__new' && !np.text.trim() ? 'Write the passage text or choose another passage option.' : '';
+        if (m)
+            return setErr(m);
+        try {
+            if (f.passageId === '__new') {
+                const p = { id: (0, db_1.uid)(), title: np.title.trim(), text: np.text.trim(), category: q.category };
+                await (0, db_1.put)('passages', p);
+                q.passageId = p.id;
+            }
+            await (0, db_1.put)('questions', q);
+            reload();
+            location.hash = '#/questions';
+        }
+        catch (e) {
+            setErr('Could not save: ' + e.message);
+        }
+    };
+    const pas = f.passageId === '__new' ? (np.text ? { title: np.title, text: np.text } : null) : d.passages.find(p => p.id === f.passageId);
+    if (prev)
+        return (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)("h1", { children: "Preview" }), (0, jsx_runtime_1.jsx)(ui_1.Passage, { p: pas }), (0, jsx_runtime_1.jsxs)("div", { className: "card", children: [(0, jsx_runtime_1.jsx)("p", { className: "qt", children: f.text || '(no question text)' }), f.options.map((o, i) => (0, jsx_runtime_1.jsxs)("div", { className: 'opt' + (f.answer === L[i] ? ' right' : ''), children: [(0, jsx_runtime_1.jsx)("b", { children: L[i] }), (0, jsx_runtime_1.jsx)("span", { children: o })] }, i)), (0, jsx_runtime_1.jsxs)("p", { className: "muted", children: ["Correct: ", f.answer, ". ", f.explanation] })] }), (0, jsx_runtime_1.jsx)("div", { className: "row", children: (0, jsx_runtime_1.jsx)("button", { className: "btn ghost", onClick: () => setPrev(false), children: "Back to editing" }) })] });
+    return (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)("h1", { children: ex ? 'Edit question' : 'Add question' }), (0, jsx_runtime_1.jsxs)("div", { className: "card form", children: [(0, jsx_runtime_1.jsxs)("label", { children: ["Category", (0, jsx_runtime_1.jsx)("input", { list: "cats", value: f.category, onChange: set('category'), maxLength: 60 })] }), (0, jsx_runtime_1.jsx)("datalist", { id: "cats", children: cats(d.questions).map(c => (0, jsx_runtime_1.jsx)("option", { value: c }, c)) }), (0, jsx_runtime_1.jsxs)("label", { children: ["Passage", (0, jsx_runtime_1.jsxs)("select", { value: f.passageId, onChange: set('passageId'), children: [(0, jsx_runtime_1.jsx)("option", { value: "", children: "No passage (standalone)" }), d.passages.map(p => (0, jsx_runtime_1.jsx)("option", { value: p.id, children: p.title || p.text.slice(0, 40) }, p.id)), (0, jsx_runtime_1.jsx)("option", { value: "__new", children: "+ Create new passage" })] })] }), f.passageId === '__new' && (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsxs)("label", { children: ["Passage title (optional)", (0, jsx_runtime_1.jsx)("input", { value: np.title, onChange: e => setNp({ ...np, title: e.target.value }) })] }), (0, jsx_runtime_1.jsxs)("label", { children: ["Passage text", (0, jsx_runtime_1.jsx)("textarea", { rows: 7, value: np.text, onChange: e => setNp({ ...np, text: e.target.value }) })] })] }), f.passageId && f.passageId !== '__new' && (0, jsx_runtime_1.jsx)(ui_1.Passage, { p: pas }), (0, jsx_runtime_1.jsxs)("label", { children: ["Question", (0, jsx_runtime_1.jsx)("textarea", { rows: 3, value: f.text, onChange: set('text') })] }), L.map((l, i) => (0, jsx_runtime_1.jsxs)("label", { children: ["Option ", l, (0, jsx_runtime_1.jsx)("input", { value: f.options[i], onChange: opt(i) })] }, l)), (0, jsx_runtime_1.jsxs)("label", { children: ["Correct answer", (0, jsx_runtime_1.jsx)(Sel, { v: f.answer, on: set('answer'), opts: L })] }), (0, jsx_runtime_1.jsxs)("label", { children: ["Explanation (optional)", (0, jsx_runtime_1.jsx)("textarea", { rows: 3, value: f.explanation, onChange: set('explanation') })] }), (0, jsx_runtime_1.jsxs)("div", { className: "two", children: [(0, jsx_runtime_1.jsxs)("label", { children: ["Difficulty", (0, jsx_runtime_1.jsx)(Sel, { v: f.difficulty, on: set('difficulty'), opts: DIFF })] }), (0, jsx_runtime_1.jsxs)("label", { children: ["Status", (0, jsx_runtime_1.jsx)(Sel, { v: f.status, on: set('status'), opts: STAT })] })] }), err && (0, jsx_runtime_1.jsx)("p", { className: "errtxt", role: "alert", children: err }), (0, jsx_runtime_1.jsxs)("div", { className: "row", children: [(0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: save, children: "Save question" }), (0, jsx_runtime_1.jsx)("button", { className: "btn ghost", onClick: () => setPrev(true), children: "Preview" }), (0, jsx_runtime_1.jsx)("a", { className: "btn ghost", href: "#/questions", children: "Cancel" })] })] })] });
+}
+function Passages({ d, reload }) {
+    const [e, setE] = (0, react_1.useState)(null), [err, setErr] = (0, react_1.useState)('');
+    const n = id => d.questions.filter(q => q.passageId === id).length;
+    const save = async () => {
+        if (!e.text.trim())
+            return setErr('Passage text is required.');
+        await (0, db_1.put)('passages', { ...e, title: e.title.trim(), text: e.text.trim() });
+        setE(null);
+        setErr('');
+        reload();
+    };
+    const rm = async (p) => {
+        const c = n(p.id);
+        if (!confirm(c ? `${c} question${c > 1 ? 's use' : ' uses'} this passage. Deleting it leaves ${c > 1 ? 'them' : 'it'} as standalone and the passage text will be gone. Delete anyway?` : 'Delete this passage?'))
+            return;
+        for (const q of d.questions.filter(q => q.passageId === p.id))
+            await (0, db_1.put)('questions', { ...q, passageId: null });
+        await (0, db_1.del)('passages', p.id);
+        reload();
+    };
+    return (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsxs)("div", { className: "between", children: [(0, jsx_runtime_1.jsx)("h1", { children: "Passages" }), (0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: () => setE({ id: (0, db_1.uid)(), title: '', text: '', category: '' }), children: "New passage" })] }), e && (0, jsx_runtime_1.jsxs)("div", { className: "card form", children: [(0, jsx_runtime_1.jsxs)("label", { children: ["Title (optional)", (0, jsx_runtime_1.jsx)("input", { value: e.title, onChange: x => setE({ ...e, title: x.target.value }) })] }), (0, jsx_runtime_1.jsxs)("label", { children: ["Category (optional)", (0, jsx_runtime_1.jsx)("input", { value: e.category || '', onChange: x => setE({ ...e, category: x.target.value }) })] }), (0, jsx_runtime_1.jsxs)("label", { children: ["Text", (0, jsx_runtime_1.jsx)("textarea", { rows: 8, value: e.text, onChange: x => setE({ ...e, text: x.target.value }) })] }), err && (0, jsx_runtime_1.jsx)("p", { className: "errtxt", role: "alert", children: err }), (0, jsx_runtime_1.jsxs)("div", { className: "row", children: [(0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: save, children: "Save passage" }), (0, jsx_runtime_1.jsx)("button", { className: "btn ghost", onClick: () => { setE(null); setErr(''); }, children: "Cancel" })] })] }), !d.passages.length && !e ? (0, jsx_runtime_1.jsx)("div", { className: "card", children: (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "No passages yet. Create one here or while adding a question." }) })
+                : d.passages.map(p => (0, jsx_runtime_1.jsxs)("article", { className: "card", children: [(0, jsx_runtime_1.jsx)("h2", { children: p.title || 'Untitled passage' }), (0, jsx_runtime_1.jsx)("p", { className: "muted clamp", children: p.text }), (0, jsx_runtime_1.jsxs)("p", { className: "muted", children: [n(p.id), " linked question", n(p.id) === 1 ? '' : 's'] }), (0, jsx_runtime_1.jsxs)("div", { className: "row", children: [(0, jsx_runtime_1.jsx)("button", { className: "btn ghost sm", onClick: () => setE({ ...p }), children: "Edit" }), (0, jsx_runtime_1.jsx)("button", { className: "btn danger sm", onClick: () => rm(p), children: "Delete" })] })] }, p.id))] });
+}
+function CreateQuiz({ d, reload }) {
+    const [o, setO] = (0, react_1.useState)({ n: '4', categories: [], difficulty: '', unseenOnly: false, revision: true, skipUsed: true });
+    const [quiz, setQuiz] = (0, react_1.useState)(null), [err, setErr] = (0, react_1.useState)(''), [title, setTitle] = (0, react_1.useState)(''), [out, setOut] = (0, react_1.useState)(null);
+    const used = new Set(d.quizzes.flatMap(z => ((z.quiz && z.quiz.questions) || []).map(q => q.id)));
+    const toggleCat = c => setO({ ...o, categories: o.categories.includes(c) ? o.categories.filter(x => x !== c) : [...o.categories, c] });
+    const fixN = () => { const n = Math.max(1, Math.min(100, parseInt(o.n, 10) || 1)); setO(x => ({ ...x, n: String(n) })); return n; };
+    const gen = () => {
+        setOut(null);
+        const n = fixN();
+        const r = (0, lib_1.selectQuiz)(d.questions, d.passages, { ...o, n, used: o.skipUsed ? used : null });
+        if (r.error) {
+            setQuiz(null);
+            return setErr(r.error + (o.skipUsed && used.size ? ` ${used.size} question${used.size === 1 ? ' is' : 's are'} hidden because earlier quizzes used them. Untick “Skip questions used in earlier quizzes” to allow repeats.` : ''));
+        }
+        setErr('');
+        setQuiz(r);
+        setTitle((o.categories.length === 1 ? o.categories[0] : o.categories.length > 1 ? 'Mixed quiz' : 'Practice quiz') + ' · ' + new Date().toLocaleDateString());
+    };
+    const publish = async () => {
+        const full = { v: 1, id: (0, db_1.uid)().slice(0, 8), title: title.trim() || 'Practice quiz', createdAt: Date.now(), ...quiz };
+        try {
+            const url = link('quiz/' + await (0, lib_1.pack)((0, lib_1.compact)(full)));
+            if (url.length > lib_1.LIMITS.max)
+                return setErr(`This link would be ${url.length.toLocaleString()} characters, above the ${lib_1.LIMITS.max.toLocaleString()} limit. Choose fewer questions or shorter passages.`);
+            await (0, db_1.put)('quizzes', { id: full.id, title: full.title, createdAt: full.createdAt, count: full.questions.length, quiz: full });
+            reload();
+            setErr('');
+            setOut({ url, title: full.title });
+        }
+        catch (e) {
+            setErr('Could not create the link: ' + e.message);
+        }
+    };
+    const pas = id => quiz.passages.find(p => p.id === id);
+    return (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)("h1", { children: "Create quiz" }), (0, jsx_runtime_1.jsxs)("div", { className: "card form", children: [(0, jsx_runtime_1.jsxs)("div", { className: "two", children: [(0, jsx_runtime_1.jsxs)("label", { children: ["Number of questions", (0, jsx_runtime_1.jsx)("input", { type: "number", inputMode: "numeric", min: 1, max: 100, value: o.n, onChange: e => setO({ ...o, n: e.target.value.replace(/\D/g, '').slice(0, 3) }), onBlur: fixN })] }), (0, jsx_runtime_1.jsxs)("label", { children: ["Difficulty", (0, jsx_runtime_1.jsx)(Sel, { v: o.difficulty, on: e => setO({ ...o, difficulty: e.target.value }), opts: DIFF, all: "Any" })] })] }), (0, jsx_runtime_1.jsxs)("fieldset", { style: { border: 0, padding: 0, margin: 0 }, children: [(0, jsx_runtime_1.jsxs)("legend", { children: ["Categories ", o.categories.length ? `(${o.categories.length} selected)` : '(none selected = all)'] }), cats(d.questions).map(c => (0, jsx_runtime_1.jsxs)("label", { className: "chk", children: [(0, jsx_runtime_1.jsx)("input", { type: "checkbox", checked: o.categories.includes(c), onChange: () => toggleCat(c) }), c] }, c)), o.categories.length > 0 && (0, jsx_runtime_1.jsx)("button", { type: "button", className: "btn ghost sm", onClick: () => setO({ ...o, categories: [] }), children: "Clear categories" })] }), (0, jsx_runtime_1.jsxs)("label", { className: "chk", children: [(0, jsx_runtime_1.jsx)("input", { type: "checkbox", checked: o.unseenOnly, onChange: e => setO({ ...o, unseenOnly: e.target.checked }) }), "Only unseen questions"] }), (0, jsx_runtime_1.jsxs)("label", { className: "chk", children: [(0, jsx_runtime_1.jsx)("input", { type: "checkbox", checked: o.revision, onChange: e => setO({ ...o, revision: e.target.checked }) }), "Include \u201CNeeds Revision\u201D questions"] }), (0, jsx_runtime_1.jsxs)("label", { className: "chk", children: [(0, jsx_runtime_1.jsx)("input", { type: "checkbox", checked: o.skipUsed, onChange: e => setO({ ...o, skipUsed: e.target.checked }) }), "Skip questions used in earlier quizzes"] }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Questions that share a passage are always kept together, so the count must be reachable without splitting a passage." }), (0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: gen, children: quiz ? 'Pick again' : 'Generate preview' })] }), err && (0, jsx_runtime_1.jsx)("div", { className: "card err", role: "alert", children: err }), quiz && (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)("h2", { children: "Preview" }), (0, jsx_runtime_1.jsxs)("label", { className: "card form", children: ["Quiz title", (0, jsx_runtime_1.jsx)("input", { value: title, onChange: e => setTitle(e.target.value) })] }), quiz.questions.map((q, i) => (0, jsx_runtime_1.jsxs)("div", { children: [q.passageId && q.passageId !== quiz.questions[i - 1]?.passageId && (0, jsx_runtime_1.jsx)(ui_1.Passage, { p: pas(q.passageId) }), (0, jsx_runtime_1.jsxs)("article", { className: "card", children: [(0, jsx_runtime_1.jsxs)("p", { className: "qt", children: [i + 1, ". ", q.text] }), q.options.map((t, j) => (0, jsx_runtime_1.jsxs)("div", { className: 'opt' + (q.answer === L[j] ? ' right' : ''), children: [(0, jsx_runtime_1.jsx)("b", { children: L[j] }), (0, jsx_runtime_1.jsx)("span", { children: t })] }, j))] })] }, q.id)), (0, jsx_runtime_1.jsx)("button", { className: "btn", onClick: publish, children: "Create share link" })] }), out && (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)("h2", { children: "Share link" }), (0, jsx_runtime_1.jsx)(ui_1.ShareBox, { url: out.url, title: out.title, text: `Quiz: ${out.title}` }), (0, jsx_runtime_1.jsxs)("p", { className: "muted", children: [out.url.length.toLocaleString(), " characters.", out.url.length > lib_1.LIMITS.warn && ' This is long. Some messaging apps may cut it off, so check it opens before sending.'] }), (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "The quiz and its answer key live inside the link. Anyone technical can decode the answers, so use it for casual practice only. Results don't sync automatically: the participant sends you a results link." })] })] });
+}
+
+};
+__defs["App"]=function(module,exports,require){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.default = App;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = require("react");
+const db_1 = require("./db");
+const Admin_1 = require("./Admin");
+const TextImport_1 = require("./TextImport");
+const Participant_1 = require("./Participant");
+const NAV = [['', 'Home'], ['questions', 'Questions'], ['passages', 'Passages'], ['create-quiz', 'Create quiz'], ['import', 'Import']];
+function Admin({ seg }) {
+    const { d, err, reload } = (0, db_1.useData)();
+    const p = seg[0] || '';
+    const props = { d, reload };
+    let page;
+    if (err)
+        page = (0, jsx_runtime_1.jsxs)("div", { className: "card err", children: ["Storage unavailable: ", err, " Private browsing can block IndexedDB."] });
+    else if (!d)
+        page = (0, jsx_runtime_1.jsx)("p", { className: "muted", children: "Loading\u2026" });
+    else
+        page = p === '' ? (0, jsx_runtime_1.jsx)(Admin_1.Dashboard, { ...props }) : p === 'questions' ? (seg[1] ? (0, jsx_runtime_1.jsx)(Admin_1.QuestionForm, { ...props, id: seg[1] }) : (0, jsx_runtime_1.jsx)(Admin_1.Questions, { ...props }))
+            : p === 'passages' ? (0, jsx_runtime_1.jsx)(Admin_1.Passages, { ...props }) : p === 'create-quiz' ? (0, jsx_runtime_1.jsx)(Admin_1.CreateQuiz, { ...props }) : p === 'import' ? (0, jsx_runtime_1.jsx)(TextImport_1.TextImport, { ...props }) : (0, jsx_runtime_1.jsxs)("div", { className: "card", children: ["Page not found. ", (0, jsx_runtime_1.jsx)("a", { href: "#/", children: "Go home" })] });
+    return (0, jsx_runtime_1.jsxs)("div", { className: "shell", children: [(0, jsx_runtime_1.jsxs)("header", { className: "top", children: [(0, jsx_runtime_1.jsx)("b", { className: "brand", children: "Passage Quiz Studio" }), (0, jsx_runtime_1.jsx)("nav", { "aria-label": "Main", children: NAV.map(([h, t]) => (0, jsx_runtime_1.jsx)("a", { href: '#/' + h, "aria-current": p === h ? 'page' : undefined, children: t }, h)) })] }), (0, jsx_runtime_1.jsx)("main", { children: page })] });
+}
+function App() {
+    const [h, setH] = (0, react_1.useState)(location.hash);
+    (0, react_1.useEffect)(() => { const f = () => { setH(location.hash); scrollTo(0, 0); }; addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+    const seg = h.replace(/^#/, '').split('/').filter(Boolean);
+    if (seg[0] === 'quiz')
+        return (0, jsx_runtime_1.jsx)(Participant_1.Quiz, { payload: seg[1] });
+    if (seg[0] === 'results')
+        return (0, jsx_runtime_1.jsx)(Participant_1.SharedResult, { payload: seg[1] });
+    return (0, jsx_runtime_1.jsx)(Admin, { seg: seg });
+}
+
+};
+__defs["main"]=function(module,exports,require){
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = require("react");
+const client_1 = require("react-dom/client");
+const App_1 = __importDefault(require("./App"));
+class Boundary extends react_1.Component {
+    constructor() {
+        super(...arguments);
+        this.state = { e: null };
+    }
+    static getDerivedStateFromError(e) { return { e }; }
+    render() { return this.state.e ? (0, jsx_runtime_1.jsx)("div", { className: "shell", children: (0, jsx_runtime_1.jsxs)("div", { className: "card err", children: [(0, jsx_runtime_1.jsx)("h2", { children: "Something went wrong" }), (0, jsx_runtime_1.jsx)("p", { children: this.state.e.message }), (0, jsx_runtime_1.jsx)("a", { className: "btn", href: "#/", onClick: () => setTimeout(() => location.reload()), children: "Reload" })] }) }) : this.props.children; }
+}
+(0, client_1.createRoot)(document.getElementById('root')).render((0, jsx_runtime_1.jsx)(Boundary, { children: (0, jsx_runtime_1.jsx)(App_1.default, {}) }));
+
+};
+__req('main');
+
+</script></body></html>
