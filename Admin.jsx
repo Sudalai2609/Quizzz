@@ -120,11 +120,13 @@ export function Passages({d,reload}){
 }
 
 export function CreateQuiz({d,reload}){
-  const [o,setO]=useState({n:4,category:'',difficulty:'',unseenOnly:false,revision:true,skipUsed:true});
+  const [o,setO]=useState({n:'4',categories:[],difficulty:'',unseenOnly:false,revision:true,skipUsed:true});
   const [quiz,setQuiz]=useState(null),[err,setErr]=useState(''),[title,setTitle]=useState(''),[out,setOut]=useState(null);
   const used=new Set(d.quizzes.flatMap(z=>((z.quiz&&z.quiz.questions)||[]).map(q=>q.id)));
-  const gen=()=>{setOut(null);const r=selectQuiz(d.questions,d.passages,{...o,used:o.skipUsed?used:null});
-    if(r.error){setQuiz(null);return setErr(r.error+(o.skipUsed&&used.size?` ${used.size} question${used.size===1?' is':'s are'} hidden because earlier quizzes used them. Untick “Skip questions used in earlier quizzes” to allow repeats.`:''))}setErr('');setQuiz(r);setTitle((o.category||'Practice quiz')+' · '+new Date().toLocaleDateString())};
+  const toggleCat=c=>setO({...o,categories:o.categories.includes(c)?o.categories.filter(x=>x!==c):[...o.categories,c]});
+  const fixN=()=>{const n=Math.max(1,Math.min(100,parseInt(o.n,10)||1));setO(x=>({...x,n:String(n)}));return n};
+  const gen=()=>{setOut(null);const n=fixN();const r=selectQuiz(d.questions,d.passages,{...o,n,used:o.skipUsed?used:null});
+    if(r.error){setQuiz(null);return setErr(r.error+(o.skipUsed&&used.size?` ${used.size} question${used.size===1?' is':'s are'} hidden because earlier quizzes used them. Untick “Skip questions used in earlier quizzes” to allow repeats.`:''))}setErr('');setQuiz(r);setTitle((o.categories.length===1?o.categories[0]:o.categories.length>1?'Mixed quiz':'Practice quiz')+' · '+new Date().toLocaleDateString())};
   const publish=async()=>{
     const full={v:1,id:uid().slice(0,8),title:title.trim()||'Practice quiz',createdAt:Date.now(),...quiz};
     try{const url=link('quiz/'+await pack(compact(full)));
@@ -133,9 +135,11 @@ export function CreateQuiz({d,reload}){
     catch(e){setErr('Could not create the link: '+e.message)}};
   const pas=id=>quiz.passages.find(p=>p.id===id);
   return <><h1>Create quiz</h1><div className="card form">
-    <div className="two"><label>Number of questions<input type="number" inputMode="numeric" min={1} max={100} value={o.n} onChange={e=>setO({...o,n:Math.max(1,Math.min(100,+e.target.value||1))})}/></label>
+    <div className="two"><label>Number of questions<input type="number" inputMode="numeric" min={1} max={100} value={o.n} onChange={e=>setO({...o,n:e.target.value.replace(/\D/g,'').slice(0,3)})} onBlur={fixN}/></label>
       <label>Difficulty<Sel v={o.difficulty} on={e=>setO({...o,difficulty:e.target.value})} opts={DIFF} all="Any"/></label></div>
-    <label>Category<Sel v={o.category} on={e=>setO({...o,category:e.target.value})} opts={cats(d.questions)} all="All categories"/></label>
+    <fieldset style={{border:0,padding:0,margin:0}}><legend>Categories {o.categories.length?`(${o.categories.length} selected)`:'(none selected = all)'}</legend>
+      {cats(d.questions).map(c=><label className="chk" key={c}><input type="checkbox" checked={o.categories.includes(c)} onChange={()=>toggleCat(c)}/>{c}</label>)}
+      {o.categories.length>0&&<button type="button" className="btn ghost sm" onClick={()=>setO({...o,categories:[]})}>Clear categories</button>}</fieldset>
     <label className="chk"><input type="checkbox" checked={o.unseenOnly} onChange={e=>setO({...o,unseenOnly:e.target.checked})}/>Only unseen questions</label>
     <label className="chk"><input type="checkbox" checked={o.revision} onChange={e=>setO({...o,revision:e.target.checked})}/>Include “Needs Revision” questions</label>
     <label className="chk"><input type="checkbox" checked={o.skipUsed} onChange={e=>setO({...o,skipUsed:e.target.checked})}/>Skip questions used in earlier quizzes</label>

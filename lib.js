@@ -29,7 +29,8 @@ export function validateQuiz(q){
 export const validQuestion=q=>q&&q.id&&q.text&&q.category&&Array.isArray(q.options)&&q.options.length===4&&['A','B','C','D'].includes(q.answer);
 const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
 export function selectQuiz(qs,passages,o){
-  const pool=qs.filter(q=>(!o.category||q.category===o.category)&&(!o.difficulty||q.difficulty===o.difficulty)&&
+  const cs=o.categories&&o.categories.length?o.categories:(o.category?[o.category]:[]);
+  const pool=qs.filter(q=>(!cs.length||cs.includes(q.category))&&(!o.difficulty||q.difficulty===o.difficulty)&&
     (q.status==='Needs Revision'?o.revision:q.status==='Unseen'||!o.unseenOnly)&&!(o.used&&o.used.has(q.id)));
   const m=new Map(),groups=[];
   pool.forEach(q=>{if(q.passageId){if(!m.has(q.passageId)){const g={pid:q.passageId,qs:[]};m.set(q.passageId,g);groups.push(g)}m.get(q.passageId).qs.push(q)}else groups.push({qs:[q]})});
